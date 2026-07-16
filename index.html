@@ -1052,6 +1052,31 @@
             border-radius: 30px;
             margin-bottom: 8px;
         }
+        /* CUSTOM QUIZ SIZE INPUT */
+        .quiz-size-input {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .quiz-size-input label {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-light);
+        }
+        .quiz-size-input input {
+            width: 60px;
+            padding: 6px 8px;
+            border: 2px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            background: var(--input-bg);
+            color: var(--text);
+            font-size: 14px;
+            text-align: center;
+        }
+        .quiz-size-input input:focus {
+            outline: none;
+            border-color: var(--primary-light);
+        }
     </style>
 </head>
 <body>
@@ -1179,6 +1204,10 @@
                 <div class="page-header">
                     <h1>🧠 Luyện tập <small>10 dạng câu hỏi</small></h1>
                     <div class="actions">
+                        <div class="quiz-size-input">
+                            <label for="quizSizeInput">Số từ mỗi lượt:</label>
+                            <input type="number" id="quizSizeInput" min="2" max="50" value="10" />
+                        </div>
                         <button class="btn btn-primary" onclick="startQuiz()"><i class="fas fa-play"></i> Bắt đầu</button>
                     </div>
                 </div>
@@ -1413,8 +1442,8 @@
         let sentenceSelected = [];
 
         // Matching state
-        let matchingPairs = []; // [{word, meaning, matched}]
-        let matchingSelected = null; // 'word' or 'meaning'
+        let matchingPairs = [];
+        let matchingSelected = null;
         let matchingSelectedIndex = -1;
 
         // Gap fill state
@@ -1864,10 +1893,19 @@
 
         function startQuiz() {
             if (words.length < 3) { showToast('Cần ít nhất 3 từ', 'error'); return; }
+
+            // Lấy số lượng từ từ input
+            const sizeInput = document.getElementById('quizSizeInput');
+            let size = parseInt(sizeInput.value, 10);
+            if (isNaN(size) || size < 2) size = 2;
+            const maxSize = words.length;
+            if (size > maxSize) size = maxSize;
+            sizeInput.value = size; // cập nhật lại giá trị hợp lệ
+
             const pool = words.filter(w => !w.mastered);
-            const source = pool.length >= 3 ? pool : words;
+            const source = pool.length >= size ? pool : words;
             const shuffled = [...source].sort(() => Math.random() - 0.5);
-            const count = Math.min(20, shuffled.length);
+            const count = Math.min(size, shuffled.length);
             quizWords = shuffled.slice(0, count);
             quizIndex = 0;
             quizScore = 0;
