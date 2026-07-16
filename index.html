@@ -1483,9 +1483,11 @@
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
                 if (!Array.isArray(data) || data.length === 0) throw new Error('Dữ liệu không hợp lệ hoặc rỗng');
+                // Validate and import
                 const imported = data.filter(item => item.word && item.meaning);
                 if (imported.length === 0) throw new Error('Không tìm thấy từ hợp lệ');
 
+                // Gán dữ liệu vào words
                 words = imported.map(item => ({
                     id: item.id || nextId++,
                     word: item.word.trim(),
@@ -1498,15 +1500,18 @@
                     dateAdded: item.dateAdded || Date.now(),
                 }));
 
+                // Cập nhật nextId
                 const maxId = words.reduce((max, w) => Math.max(max, w.id || 0), 0);
                 if (maxId >= nextId) nextId = maxId + 1;
 
+                // Lưu vào localStorage để dùng offline
                 saveToStorage();
                 renderAll();
                 updateSidebarStats();
                 showToast(`✅ Đã tải ${words.length} từ từ /voca/voca.json`, 'success');
             } catch (err) {
                 console.warn('Không thể tải /voca/voca.json:', err.message);
+                // Fallback: dùng dữ liệu từ localStorage hoặc mặc định
                 loadFromStorage();
                 if (words.length === 0) {
                     words = DEFAULT_WORDS.map(w => ({ ...w }));
@@ -1519,6 +1524,7 @@
             }
         }
 
+        // Hàm reload thủ công
         async function reloadFromJson() {
             await loadFromJsonFile();
         }
@@ -1861,7 +1867,7 @@
             const pool = words.filter(w => !w.mastered);
             const source = pool.length >= 3 ? pool : words;
             const shuffled = [...source].sort(() => Math.random() - 0.5);
-            const count = Math.min(10, shuffled.length);
+            const count = Math.min(20, shuffled.length);
             quizWords = shuffled.slice(0, count);
             quizIndex = 0;
             quizScore = 0;
@@ -1972,7 +1978,7 @@
             return map[type] || type;
         }
 
-        // ---------- 1. Multiple choice (giữ nguyên) ----------
+        // ---------- 1. Multiple choice ----------
         function renderMultipleChoice(w) {
             let options = [w.meaning];
             const pool = words.filter(x => x.id !== w.id);
@@ -2010,7 +2016,7 @@
                 renderQuizQuestion(); }, 1000);
         }
 
-        // ---------- 2. Listening (giữ nguyên) ----------
+        // ---------- 2. Listening (chọn từ đúng) ----------
         function renderListening(w) {
             let options = [w.word];
             const pool = words.filter(x => x.id !== w.id);
@@ -2046,7 +2052,7 @@
                 renderQuizQuestion(); }, 1000);
         }
 
-        // ---------- 3. Fill blank (giữ nguyên) ----------
+        // ---------- 3. Fill blank ----------
         function renderFillBlank(w) {
             const example = w.example || `${w.word} is a common word.`;
             const regex = new RegExp(`\\b${w.word}\\b`, 'i');
@@ -2112,7 +2118,7 @@
             }
         }
 
-        // ---------- 4. Listening type (giữ nguyên) ----------
+        // ---------- 4. Listening type (nghe và viết) ----------
         function renderListeningType(w) {
             return `
                 <div class="quiz-question">🎧 <small>Nghe và nhập từ đúng</small>
@@ -2147,7 +2153,7 @@
                 renderQuizQuestion(); }, 1500);
         }
 
-        // ---------- 5. Word class (giữ nguyên) ----------
+        // ---------- 5. Word class ----------
         function renderWordClass(w) {
             const classMap = { noun: 'Danh từ', verb: 'Động từ', adj: 'Tính từ', adv: 'Trạng từ', prep: 'Giới từ',
                 conj: 'Liên từ', pron: 'Đại từ', interj: 'Thán từ', n: 'Danh từ', v: 'Động từ', adj: 'Tính từ',
@@ -2187,7 +2193,7 @@
                 renderQuizQuestion(); }, 1000);
         }
 
-        // ---------- 6. Sentence order (giữ nguyên) ----------
+        // ---------- 6. Sentence order ----------
         function renderSentenceOrder(w) {
             const sentence = w.example || `${w.word} is a common word.`;
             const tokens = sentence.match(/\S+|\s+/g) || [];
@@ -2270,7 +2276,7 @@
                 renderQuizQuestion(); }, 2000);
         }
 
-        // ---------- 7. Meaning to word (giữ nguyên) ----------
+        // ---------- 7. Meaning to word ----------
         function renderMeaningToWord(w) {
             let options = [w.word];
             const pool = words.filter(x => x.id !== w.id);
@@ -2721,7 +2727,9 @@
         // ============================================================
         async function init() {
             applyTheme();
+            // Thử đọc từ file JSON trước
             await loadFromJsonFile();
+            // Nếu vẫn chưa có dữ liệu, fallback
             if (words.length === 0) {
                 loadFromStorage();
                 if (words.length === 0) {
@@ -2732,6 +2740,7 @@
                 renderAll();
                 updateSidebarStats();
             }
+            // Đảm bảo các trường còn thiếu
             words = words.map(w => ({ ...w, wordClass: w.wordClass || '', pronunciation: w.pronunciation || '',
                 category: w.category || 'general' }));
             renderAll();
@@ -2739,6 +2748,7 @@
             saveToStorage();
         }
 
+        // Khởi động
         init();
     </script>
 </body>
