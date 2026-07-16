@@ -7,7 +7,6 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet" />
     <style>
-        /* ... (giữ nguyên CSS như trước) ... */
         /* ===== RESET & BASE ===== */
         *,
         *::before,
@@ -714,6 +713,90 @@
         .sentence-word.placed:hover {
             transform: none;
         }
+        /* ===== MATCHING QUIZ ===== */
+        .matching-container {
+            display: flex;
+            gap: 40px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin: 20px 0;
+        }
+        .matching-col {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-width: 150px;
+            flex: 1;
+        }
+        .matching-col h4 {
+            text-align: center;
+            color: var(--text-light);
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+        .matching-item {
+            padding: 12px 16px;
+            background: var(--input-bg);
+            border-radius: var(--radius-sm);
+            text-align: center;
+            cursor: pointer;
+            transition: var(--transition);
+            border: 2px solid transparent;
+            font-weight: 500;
+            user-select: none;
+        }
+        .matching-item:hover:not(.matched):not(.disabled) {
+            background: var(--hover-bg);
+            transform: scale(1.02);
+        }
+        .matching-item.selected {
+            border-color: var(--primary);
+            background: rgba(108, 92, 231, 0.15);
+        }
+        .matching-item.matched {
+            background: var(--success);
+            color: #fff;
+            cursor: default;
+            opacity: 0.7;
+        }
+        .matching-item.wrong {
+            border-color: var(--danger);
+            background: rgba(225, 112, 85, 0.15);
+        }
+        .matching-item.disabled {
+            cursor: default;
+            opacity: 0.5;
+        }
+        /* ===== GAP FILL QUIZ ===== */
+        .gap-fill-word {
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: 4px;
+            padding: 20px;
+            background: var(--input-bg);
+            border-radius: var(--radius-sm);
+            margin: 16px 0;
+            text-align: center;
+            font-family: monospace;
+        }
+        .gap-fill-word .missing {
+            color: var(--primary);
+            text-decoration: underline;
+            text-decoration-style: dotted;
+        }
+        /* ===== TRUE/FALSE QUIZ ===== */
+        .truefalse-options {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin: 20px 0;
+        }
+        .truefalse-options .btn {
+            min-width: 120px;
+            justify-content: center;
+            font-size: 18px;
+            padding: 14px 30px;
+        }
         /* ===== ADD WORD FORM ===== */
         .form-group {
             margin-bottom: 18px;
@@ -873,6 +956,10 @@
                 flex-direction: column;
                 align-items: center;
             }
+            .matching-container {
+                flex-direction: column;
+                align-items: stretch;
+            }
         }
         @media (max-width: 480px) {
             body {
@@ -900,6 +987,10 @@
             }
             .stat-card .number {
                 font-size: 22px;
+            }
+            .truefalse-options {
+                flex-direction: column;
+                align-items: center;
             }
         }
         .page {
@@ -1086,7 +1177,7 @@
             <!-- QUIZ -->
             <section class="page" id="page-quiz">
                 <div class="page-header">
-                    <h1>🧠 Luyện tập <small>7 dạng câu hỏi</small></h1>
+                    <h1>🧠 Luyện tập <small>10 dạng câu hỏi</small></h1>
                     <div class="actions">
                         <button class="btn btn-primary" onclick="startQuiz()"><i class="fas fa-play"></i> Bắt đầu</button>
                     </div>
@@ -1321,6 +1412,19 @@
         let sentenceCorrectOrder = [];
         let sentenceSelected = [];
 
+        // Matching state
+        let matchingPairs = []; // [{word, meaning, matched}]
+        let matchingSelected = null; // 'word' or 'meaning'
+        let matchingSelectedIndex = -1;
+
+        // Gap fill state
+        let gapFillWord = '';
+        let gapFillDisplay = '';
+        let gapFillMissingIndices = [];
+
+        // True/False state
+        let trueFalseCorrect = false;
+
         let darkMode = localStorage.getItem('vocabmaster_dark') === 'true';
 
         // ============================================================
@@ -1379,11 +1483,9 @@
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
                 if (!Array.isArray(data) || data.length === 0) throw new Error('Dữ liệu không hợp lệ hoặc rỗng');
-                // Validate and import
                 const imported = data.filter(item => item.word && item.meaning);
                 if (imported.length === 0) throw new Error('Không tìm thấy từ hợp lệ');
 
-                // Gán dữ liệu vào words
                 words = imported.map(item => ({
                     id: item.id || nextId++,
                     word: item.word.trim(),
@@ -1396,18 +1498,15 @@
                     dateAdded: item.dateAdded || Date.now(),
                 }));
 
-                // Cập nhật nextId
                 const maxId = words.reduce((max, w) => Math.max(max, w.id || 0), 0);
                 if (maxId >= nextId) nextId = maxId + 1;
 
-                // Lưu vào localStorage để dùng offline
                 saveToStorage();
                 renderAll();
                 updateSidebarStats();
                 showToast(`✅ Đã tải ${words.length} từ từ /voca/voca.json`, 'success');
             } catch (err) {
                 console.warn('Không thể tải /voca/voca.json:', err.message);
-                // Fallback: dùng dữ liệu từ localStorage hoặc mặc định
                 loadFromStorage();
                 if (words.length === 0) {
                     words = DEFAULT_WORDS.map(w => ({ ...w }));
@@ -1420,7 +1519,6 @@
             }
         }
 
-        // Hàm reload thủ công
         async function reloadFromJson() {
             await loadFromJsonFile();
         }
@@ -1729,17 +1827,19 @@
         }
 
         // ============================================================
-        // QUIZ - 7 DẠNG CÂU HỎI
+        // QUIZ - 10 DẠNG CÂU HỎI
         // ============================================================
-        const QUIZ_TYPES = ['multiple', 'listening', 'fill', 'listening_type', 'word_class', 'sentence_order',
-            'meaning_to_word'
+        const QUIZ_TYPES = [
+            'multiple', 'listening', 'fill', 'listening_type',
+            'word_class', 'sentence_order', 'meaning_to_word',
+            'matching', 'gap_fill', 'true_false'
         ];
 
         function renderQuiz() {
             const container = document.getElementById('quizContent');
-            if (words.length < 2) {
+            if (words.length < 3) {
                 container.innerHTML =
-                    `<div class="empty-state" style="padding:32px 0;"><i class="fas fa-brain" style="font-size:42px;"></i><h3>Cần ít nhất 2 từ</h3></div>`;
+                    `<div class="empty-state" style="padding:32px 0;"><i class="fas fa-brain" style="font-size:42px;"></i><h3>Cần ít nhất 3 từ</h3></div>`;
                 return;
             }
             if (quizWords.length === 0 || quizIndex >= quizWords.length) {
@@ -1747,7 +1847,7 @@
                     <div class="empty-state" style="padding:32px 0;">
                         <i class="fas fa-brain" style="font-size:42px;"></i>
                         <h3>Sẵn sàng?</h3>
-                        <p>7 dạng câu hỏi đa dạng</p>
+                        <p>10 dạng câu hỏi đa dạng</p>
                         <button class="btn btn-primary mt-8" onclick="startQuiz()"><i class="fas fa-play"></i> Bắt đầu</button>
                     </div>
                 `;
@@ -1757,9 +1857,9 @@
         }
 
         function startQuiz() {
-            if (words.length < 2) { showToast('Cần ít nhất 2 từ', 'error'); return; }
+            if (words.length < 3) { showToast('Cần ít nhất 3 từ', 'error'); return; }
             const pool = words.filter(w => !w.mastered);
-            const source = pool.length >= 2 ? pool : words;
+            const source = pool.length >= 3 ? pool : words;
             const shuffled = [...source].sort(() => Math.random() - 0.5);
             const count = Math.min(10, shuffled.length);
             quizWords = shuffled.slice(0, count);
@@ -1794,9 +1894,13 @@
 
             const w = quizWords[quizIndex];
             let type = QUIZ_TYPES[Math.floor(Math.random() * QUIZ_TYPES.length)];
+            // Đảm bảo dữ liệu đủ cho từng loại
             if (type === 'sentence_order' && !w.example) type = 'multiple';
             if (type === 'word_class' && !w.wordClass) type = 'multiple';
             if (type === 'listening_type' && !w.pronunciation) type = 'listening';
+            if (type === 'matching' && quizWords.length < 2) type = 'multiple';
+            if (type === 'gap_fill' && w.word.length < 4) type = 'multiple';
+            if (type === 'true_false' && quizWords.length < 2) type = 'multiple';
 
             quizType = type;
             const total = quizWords.length;
@@ -1831,6 +1935,15 @@
                 case 'meaning_to_word':
                     html += renderMeaningToWord(w);
                     break;
+                case 'matching':
+                    html += renderMatching(w);
+                    break;
+                case 'gap_fill':
+                    html += renderGapFill(w);
+                    break;
+                case 'true_false':
+                    html += renderTrueFalse(w);
+                    break;
                 default:
                     html += renderMultipleChoice(w);
             }
@@ -1851,12 +1964,15 @@
                 listening_type: 'Nghe viết từ',
                 word_class: 'Loại từ',
                 sentence_order: 'Sắp xếp câu',
-                meaning_to_word: 'Chọn từ theo nghĩa'
+                meaning_to_word: 'Chọn từ theo nghĩa',
+                matching: 'Nối từ - nghĩa',
+                gap_fill: 'Điền chữ còn thiếu',
+                true_false: 'Đúng / Sai'
             };
             return map[type] || type;
         }
 
-        // ---------- 1. Multiple choice ----------
+        // ---------- 1. Multiple choice (giữ nguyên) ----------
         function renderMultipleChoice(w) {
             let options = [w.meaning];
             const pool = words.filter(x => x.id !== w.id);
@@ -1894,7 +2010,7 @@
                 renderQuizQuestion(); }, 1000);
         }
 
-        // ---------- 2. Listening (chọn từ đúng) ----------
+        // ---------- 2. Listening (giữ nguyên) ----------
         function renderListening(w) {
             let options = [w.word];
             const pool = words.filter(x => x.id !== w.id);
@@ -1930,7 +2046,7 @@
                 renderQuizQuestion(); }, 1000);
         }
 
-        // ---------- 3. Fill blank ----------
+        // ---------- 3. Fill blank (giữ nguyên) ----------
         function renderFillBlank(w) {
             const example = w.example || `${w.word} is a common word.`;
             const regex = new RegExp(`\\b${w.word}\\b`, 'i');
@@ -1996,7 +2112,7 @@
             }
         }
 
-        // ---------- 4. Listening type (nghe và viết) ----------
+        // ---------- 4. Listening type (giữ nguyên) ----------
         function renderListeningType(w) {
             return `
                 <div class="quiz-question">🎧 <small>Nghe và nhập từ đúng</small>
@@ -2031,7 +2147,7 @@
                 renderQuizQuestion(); }, 1500);
         }
 
-        // ---------- 5. Word class ----------
+        // ---------- 5. Word class (giữ nguyên) ----------
         function renderWordClass(w) {
             const classMap = { noun: 'Danh từ', verb: 'Động từ', adj: 'Tính từ', adv: 'Trạng từ', prep: 'Giới từ',
                 conj: 'Liên từ', pron: 'Đại từ', interj: 'Thán từ', n: 'Danh từ', v: 'Động từ', adj: 'Tính từ',
@@ -2071,7 +2187,7 @@
                 renderQuizQuestion(); }, 1000);
         }
 
-        // ---------- 6. Sentence order ----------
+        // ---------- 6. Sentence order (giữ nguyên) ----------
         function renderSentenceOrder(w) {
             const sentence = w.example || `${w.word} is a common word.`;
             const tokens = sentence.match(/\S+|\s+/g) || [];
@@ -2154,7 +2270,7 @@
                 renderQuizQuestion(); }, 2000);
         }
 
-        // ---------- 7. Meaning to word ----------
+        // ---------- 7. Meaning to word (giữ nguyên) ----------
         function renderMeaningToWord(w) {
             let options = [w.word];
             const pool = words.filter(x => x.id !== w.id);
@@ -2188,6 +2304,313 @@
             if (selected === correct) quizScore++;
             setTimeout(() => { quizIndex++;
                 renderQuizQuestion(); }, 1000);
+        }
+
+        // ---------- 8. MATCHING (Nối từ - nghĩa) ----------
+        function renderMatching(w) {
+            // Lấy 4-5 từ từ quizWords (hiện tại quizWords đã có)
+            const total = Math.min(5, quizWords.length);
+            const selected = quizWords.slice(0, total);
+            // Xáo trộn thứ tự nghĩa
+            const meanings = selected.map(item => item.meaning);
+            const shuffledMeanings = [...meanings].sort(() => Math.random() - 0.5);
+
+            matchingPairs = selected.map((item, idx) => ({
+                word: item.word,
+                meaning: meanings[idx],
+                matched: false
+            }));
+
+            matchingSelected = null;
+            matchingSelectedIndex = -1;
+
+            return `
+                <div class="quiz-question">🔗 Nối từ với nghĩa đúng</div>
+                <div class="matching-container">
+                    <div class="matching-col">
+                        <h4>Từ vựng</h4>
+                        ${selected.map((item, i) => `
+                            <div class="matching-item word-item" data-index="${i}" onclick="selectMatchingItem('word', ${i})">
+                                ${item.word}
+                            </div>
+                        `).join('')}
+                    </div>
+                    <div class="matching-col">
+                        <h4>Nghĩa</h4>
+                        ${shuffledMeanings.map((m, i) => `
+                            <div class="matching-item meaning-item" data-index="${i}" onclick="selectMatchingItem('meaning', ${i})">
+                                ${m}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                <div style="text-align:center;margin-top:10px;">
+                    <button class="btn btn-outline" onclick="resetMatching()">Đặt lại</button>
+                    <button class="btn btn-primary" onclick="checkMatching()">Kiểm tra</button>
+                </div>
+                <div style="margin-top:8px;font-size:13px;color:var(--text-light);">Đã ghép: <span id="matchedCount">0</span> / ${selected.length}</div>
+            `;
+        }
+
+        let matchingSelectedType = null;
+        let matchingSelectedIdx = -1;
+
+        function selectMatchingItem(type, index) {
+            if (quizAnswered) return;
+            // Nếu item đã được ghép, bỏ qua
+            const item = matchingPairs[index];
+            if (type === 'word' && item.matched) return;
+            if (type === 'meaning') {
+                // Tìm xem nghĩa này đã được ghép chưa
+                const matched = matchingPairs.some(p => p.matched && p.meaning === document.querySelectorAll('.meaning-item')[
+                    index].textContent.trim());
+                if (matched) return;
+            }
+
+            // Nếu chưa chọn gì, chọn item hiện tại
+            if (matchingSelectedType === null) {
+                matchingSelectedType = type;
+                matchingSelectedIdx = index;
+                // Highlight
+                document.querySelectorAll('.matching-item').forEach(el => el.classList.remove('selected'));
+                const el = document.querySelector(`.${type}-item[data-index="${index}"]`);
+                if (el) el.classList.add('selected');
+                return;
+            }
+
+            // Nếu đã chọn một item, thử ghép cặp
+            const firstType = matchingSelectedType;
+            const firstIdx = matchingSelectedIdx;
+            const secondType = type;
+            const secondIdx = index;
+
+            // Không cho phép ghép cùng loại
+            if (firstType === secondType) {
+                // Bỏ chọn cũ và chọn mới
+                document.querySelectorAll('.matching-item').forEach(el => el.classList.remove('selected'));
+                matchingSelectedType = type;
+                matchingSelectedIdx = index;
+                const el = document.querySelector(`.${type}-item[data-index="${index}"]`);
+                if (el) el.classList.add('selected');
+                return;
+            }
+
+            // Xác định word và meaning
+            let wordIdx, meaningIdx, wordItem, meaningItem;
+            if (firstType === 'word') {
+                wordIdx = firstIdx;
+                meaningIdx = secondIdx;
+            } else {
+                wordIdx = secondIdx;
+                meaningIdx = firstIdx;
+            }
+
+            const wordObj = matchingPairs[wordIdx];
+            const meaningText = document.querySelectorAll('.meaning-item')[meaningIdx].textContent.trim();
+
+            // Kiểm tra nếu từ đã ghép hoặc nghĩa đã ghép
+            if (wordObj.matched) {
+                showToast('Từ này đã được ghép!', 'error');
+                resetMatchingSelection();
+                return;
+            }
+            // Kiểm tra nghĩa đã ghép chưa
+            const meaningMatched = matchingPairs.some(p => p.matched && p.meaning === meaningText);
+            if (meaningMatched) {
+                showToast('Nghĩa này đã được ghép!', 'error');
+                resetMatchingSelection();
+                return;
+            }
+
+            // Ghép cặp tạm thời
+            if (wordObj.meaning === meaningText) {
+                // Đúng
+                wordObj.matched = true;
+                // Đánh dấu giao diện
+                const wordEl = document.querySelector(`.word-item[data-index="${wordIdx}"]`);
+                const meaningEl = document.querySelector(`.meaning-item[data-index="${meaningIdx}"]`);
+                if (wordEl) { wordEl.classList.add('matched');
+                    wordEl.classList.remove('selected'); }
+                if (meaningEl) { meaningEl.classList.add('matched');
+                    meaningEl.classList.remove('selected'); }
+                document.getElementById('matchedCount').textContent = matchingPairs.filter(p => p.matched).length;
+                resetMatchingSelection();
+                // Nếu ghép đủ hết, tự động kiểm tra
+                if (matchingPairs.every(p => p.matched)) {
+                    setTimeout(() => checkMatching(), 300);
+                }
+            } else {
+                // Sai: hiển thị lỗi và reset
+                const wordEl = document.querySelector(`.word-item[data-index="${wordIdx}"]`);
+                const meaningEl = document.querySelector(`.meaning-item[data-index="${meaningIdx}"]`);
+                if (wordEl) wordEl.classList.add('wrong');
+                if (meaningEl) meaningEl.classList.add('wrong');
+                showToast('❌ Sai, thử lại!', 'error');
+                setTimeout(() => {
+                    if (wordEl) wordEl.classList.remove('wrong');
+                    if (meaningEl) meaningEl.classList.remove('wrong');
+                    resetMatchingSelection();
+                }, 800);
+            }
+        }
+
+        function resetMatchingSelection() {
+            matchingSelectedType = null;
+            matchingSelectedIdx = -1;
+            document.querySelectorAll('.matching-item').forEach(el => el.classList.remove('selected'));
+        }
+
+        function resetMatching() {
+            if (quizAnswered) return;
+            matchingPairs.forEach(p => p.matched = false);
+            document.querySelectorAll('.matching-item').forEach(el => {
+                el.classList.remove('matched', 'selected', 'wrong');
+            });
+            document.getElementById('matchedCount').textContent = '0';
+            resetMatchingSelection();
+            showToast('🔄 Đã đặt lại', 'info');
+        }
+
+        function checkMatching() {
+            if (quizAnswered) return;
+            const total = matchingPairs.length;
+            const matched = matchingPairs.filter(p => p.matched).length;
+            if (matched === total) {
+                quizScore++;
+                showToast('✅ Chính xác!', 'success');
+                quizAnswered = true;
+                setTimeout(() => { quizIndex++;
+                    renderQuizQuestion(); }, 1500);
+            } else {
+                showToast(`❌ Bạn mới ghép đúng ${matched}/${total}`, 'error');
+            }
+        }
+
+        // ---------- 9. GAP FILL (Điền chữ còn thiếu) ----------
+        function renderGapFill(w) {
+            const word = w.word;
+            const len = word.length;
+            // Chọn ngẫu nhiên 30-50% số ký tự để ẩn (ít nhất 2 ký tự)
+            const numHide = Math.max(2, Math.floor(len * 0.4));
+            const indices = [];
+            while (indices.length < numHide) {
+                const idx = Math.floor(Math.random() * len);
+                if (!indices.includes(idx)) indices.push(idx);
+            }
+            indices.sort((a, b) => a - b);
+            gapFillMissingIndices = indices;
+
+            let display = '';
+            for (let i = 0; i < len; i++) {
+                if (indices.includes(i)) {
+                    display += '_ ';
+                } else {
+                    display += word[i] + ' ';
+                }
+            }
+
+            gapFillWord = word;
+
+            return `
+                <div class="quiz-question">✏️ Điền các chữ cái còn thiếu</div>
+                <div style="font-size:16px;color:var(--text-light);">Nghĩa: ${w.meaning}</div>
+                <div class="gap-fill-word">${display}</div>
+                <div class="quiz-fill-input">
+                    <input type="text" id="gapFillInput" placeholder="Nhập từ hoàn chỉnh..." autocomplete="off" />
+                    <button class="btn btn-primary" onclick="checkGapFill()"><i class="fas fa-check"></i> Kiểm tra</button>
+                </div>
+                <div style="font-size:13px;color:var(--text-light);">
+                    <button class="btn btn-speak btn-sm" onclick="speakWord('${w.word}')"><i class="fas fa-volume-up"></i> Nghe</button>
+                    <button class="btn btn-sm btn-outline" onclick="showGapFillAnswer()">Hiện đáp án</button>
+                </div>
+            `;
+        }
+
+        function checkGapFill() {
+            if (quizAnswered) return;
+            const input = document.getElementById('gapFillInput');
+            if (!input) return;
+            const answer = input.value.trim().toLowerCase();
+            const correct = gapFillWord.toLowerCase();
+            quizAnswered = true;
+            input.disabled = true;
+            if (answer === correct) {
+                input.classList.add('correct');
+                quizScore++;
+                showToast('✅ Chính xác!', 'success');
+            } else {
+                input.classList.add('wrong');
+                input.value = gapFillWord;
+                showToast(`❌ Đáp án: ${gapFillWord}`, 'error');
+            }
+            setTimeout(() => { quizIndex++;
+                renderQuizQuestion(); }, 1500);
+        }
+
+        function showGapFillAnswer() {
+            if (quizAnswered) return;
+            const input = document.getElementById('gapFillInput');
+            if (input) {
+                input.value = gapFillWord;
+                input.classList.add('correct');
+                input.disabled = true;
+                quizAnswered = true;
+                showToast(`Đáp án: ${gapFillWord}`, 'info');
+                setTimeout(() => { quizIndex++;
+                    renderQuizQuestion(); }, 1500);
+            }
+        }
+
+        // ---------- 10. TRUE / FALSE ----------
+        function renderTrueFalse(w) {
+            // Lấy một từ khác để tạo câu sai
+            let otherWord = null;
+            const pool = words.filter(x => x.id !== w.id);
+            if (pool.length > 0) {
+                otherWord = pool[Math.floor(Math.random() * pool.length)];
+            }
+            // Quyết định đúng hay sai: 50% đúng, 50% sai
+            const isCorrect = Math.random() < 0.5;
+            let displayWord, displayMeaning;
+            if (isCorrect) {
+                displayWord = w.word;
+                displayMeaning = w.meaning;
+            } else {
+                if (otherWord) {
+                    displayWord = w.word;
+                    displayMeaning = otherWord.meaning;
+                } else {
+                    // Nếu không có từ khác, tự tạo sai
+                    displayWord = w.word;
+                    displayMeaning = w.meaning + ' (sai)';
+                }
+            }
+            trueFalseCorrect = isCorrect;
+
+            return `
+                <div class="quiz-question">🤔 " ${displayWord} " <small>có nghĩa là</small> " ${displayMeaning} " ?</div>
+                <div class="truefalse-options">
+                    <button class="btn btn-success" onclick="checkTrueFalse(true)"><i class="fas fa-check"></i> Đúng</button>
+                    <button class="btn btn-danger" onclick="checkTrueFalse(false)"><i class="fas fa-times"></i> Sai</button>
+                </div>
+                <div style="font-size:13px;color:var(--text-light);">
+                    <button class="btn btn-speak btn-sm" onclick="speakWord('${w.word}')"><i class="fas fa-volume-up"></i> Nghe từ</button>
+                </div>
+            `;
+        }
+
+        function checkTrueFalse(userAnswer) {
+            if (quizAnswered) return;
+            quizAnswered = true;
+            const correct = userAnswer === trueFalseCorrect;
+            if (correct) {
+                quizScore++;
+                showToast('✅ Chính xác!', 'success');
+            } else {
+                showToast(`❌ Sai. Đáp án: ${trueFalseCorrect ? 'Đúng' : 'Sai'}`, 'error');
+            }
+            setTimeout(() => { quizIndex++;
+                renderQuizQuestion(); }, 1500);
         }
 
         // ============================================================
@@ -2287,6 +2710,8 @@
                     if (fillBtn) fillBtn.click();
                     const listenBtn = document.querySelector('#listenInput + .btn');
                     if (listenBtn) listenBtn.click();
+                    const gapBtn = document.querySelector('#gapFillInput + .btn');
+                    if (gapBtn) gapBtn.click();
                 }
             }
         });
@@ -2296,9 +2721,7 @@
         // ============================================================
         async function init() {
             applyTheme();
-            // Thử đọc từ file JSON trước
             await loadFromJsonFile();
-            // Nếu vẫn chưa có dữ liệu, fallback
             if (words.length === 0) {
                 loadFromStorage();
                 if (words.length === 0) {
@@ -2309,7 +2732,6 @@
                 renderAll();
                 updateSidebarStats();
             }
-            // Đảm bảo các trường còn thiếu
             words = words.map(w => ({ ...w, wordClass: w.wordClass || '', pronunciation: w.pronunciation || '',
                 category: w.category || 'general' }));
             renderAll();
@@ -2317,7 +2739,6 @@
             saveToStorage();
         }
 
-        // Khởi động
         init();
     </script>
 </body>
