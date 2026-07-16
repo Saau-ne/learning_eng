@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet" />
     <style>
+        /* ... (giữ nguyên CSS như trước) ... */
         /* ===== RESET & BASE ===== */
         *,
         *::before,
@@ -991,6 +992,7 @@
                     <button class="btn btn-sm btn-outline" onclick="exportJSON()"><i class="fas fa-download"></i> Export</button>
                     <button class="btn btn-sm btn-outline" onclick="document.getElementById('importFile').click()"><i class="fas fa-upload"></i> Import</button>
                     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importJSON(event)" />
+                    <button class="btn btn-sm btn-primary" onclick="reloadFromJson()"><i class="fas fa-sync"></i> Tải lại từ JSON</button>
                 </div>
             </div>
         </aside>
@@ -1315,7 +1317,6 @@
         let quizBest = 0;
         let quizType = 'multiple';
         let quizFillAnswer = '';
-        // For sentence order
         let sentenceWords = [];
         let sentenceCorrectOrder = [];
         let sentenceSelected = [];
@@ -1370,6 +1371,61 @@
         }
 
         // ============================================================
+        // LOAD FROM JSON FILE
+        // ============================================================
+        async function loadFromJsonFile() {
+            try {
+                const response = await fetch('/voca/voca.json');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                if (!Array.isArray(data) || data.length === 0) throw new Error('Dữ liệu không hợp lệ hoặc rỗng');
+                // Validate and import
+                const imported = data.filter(item => item.word && item.meaning);
+                if (imported.length === 0) throw new Error('Không tìm thấy từ hợp lệ');
+
+                // Gán dữ liệu vào words
+                words = imported.map(item => ({
+                    id: item.id || nextId++,
+                    word: item.word.trim(),
+                    wordClass: (item.wordClass || '').trim(),
+                    pronunciation: (item.pronunciation || '').trim(),
+                    meaning: item.meaning.trim(),
+                    example: (item.example || '').trim(),
+                    category: item.category || 'general',
+                    mastered: !!item.mastered,
+                    dateAdded: item.dateAdded || Date.now(),
+                }));
+
+                // Cập nhật nextId
+                const maxId = words.reduce((max, w) => Math.max(max, w.id || 0), 0);
+                if (maxId >= nextId) nextId = maxId + 1;
+
+                // Lưu vào localStorage để dùng offline
+                saveToStorage();
+                renderAll();
+                updateSidebarStats();
+                showToast(`✅ Đã tải ${words.length} từ từ /voca/voca.json`, 'success');
+            } catch (err) {
+                console.warn('Không thể tải /voca/voca.json:', err.message);
+                // Fallback: dùng dữ liệu từ localStorage hoặc mặc định
+                loadFromStorage();
+                if (words.length === 0) {
+                    words = DEFAULT_WORDS.map(w => ({ ...w }));
+                    nextId = words.reduce((max, w) => Math.max(max, w.id), 0) + 1;
+                    saveToStorage();
+                }
+                renderAll();
+                updateSidebarStats();
+                showToast(`⚠️ Không tìm thấy /voca/voca.json, dùng dữ liệu mặc định`, 'error');
+            }
+        }
+
+        // Hàm reload thủ công
+        async function reloadFromJson() {
+            await loadFromJsonFile();
+        }
+
+        // ============================================================
         // EXPORT / IMPORT
         // ============================================================
         function exportJSON() {
@@ -1378,10 +1434,10 @@
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `vocab_${new Date().toISOString().slice(0,10)}.json`;
+            a.download = `voca.json`;
             a.click();
             URL.revokeObjectURL(url);
-            showToast('📤 Đã xuất file JSON', 'success');
+            showToast('📤 Đã xuất file voca.json', 'success');
         }
 
         function importJSON(event) {
@@ -1422,7 +1478,7 @@
                     saveToStorage();
                     renderAll();
                     updateSidebarStats();
-                    showToast(`📥 Đã thêm ${added} từ mới, bỏ qua ${skipped} từ trùng`, 'success');
+                    showToast(`📥 Đã thêm ${added} từ, bỏ qua ${skipped} từ trùng`, 'success');
                 } catch (err) {
                     showToast('Lỗi đọc file JSON: ' + err.message, 'error');
                 }
@@ -1737,9 +1793,7 @@
             }
 
             const w = quizWords[quizIndex];
-            // Chọn ngẫu nhiên loại câu hỏi
             let type = QUIZ_TYPES[Math.floor(Math.random() * QUIZ_TYPES.length)];
-            // Đảm bảo có dữ liệu phù hợp
             if (type === 'sentence_order' && !w.example) type = 'multiple';
             if (type === 'word_class' && !w.wordClass) type = 'multiple';
             if (type === 'listening_type' && !w.pronunciation) type = 'listening';
@@ -1983,7 +2037,6 @@
                 conj: 'Liên từ', pron: 'Đại từ', interj: 'Thán từ', n: 'Danh từ', v: 'Động từ', adj: 'Tính từ',
                 adv: 'Trạng từ' };
             const correctLabel = classMap[w.wordClass] || w.wordClass;
-            // Tạo 3 đáp án nhiễu
             const allClasses = ['Danh từ', 'Động từ', 'Tính từ', 'Trạng từ', 'Giới từ', 'Liên từ', 'Đại từ', 'Thán từ'];
             let options = [correctLabel];
             const shuffled = allClasses.filter(c => c !== correctLabel).sort(() => Math.random() - 0.5);
@@ -2021,11 +2074,9 @@
         // ---------- 6. Sentence order ----------
         function renderSentenceOrder(w) {
             const sentence = w.example || `${w.word} is a common word.`;
-            // Tách từ, loại dấu câu
             const tokens = sentence.match(/\S+|\s+/g) || [];
             const wordsOnly = tokens.filter(t => t.trim().length > 0 && !/^[.,!?;:]$/.test(t));
             if (wordsOnly.length < 2) return renderMultipleChoice(w);
-            // Xáo trộn
             const shuffled = [...wordsOnly].sort(() => Math.random() - 0.5);
             sentenceCorrectOrder = wordsOnly.slice();
             sentenceWords = shuffled;
@@ -2051,7 +2102,6 @@
             if (quizAnswered) return;
             const wordEl = document.querySelector(`.sentence-word[data-idx="${idx}"]`);
             if (!wordEl || wordEl.classList.contains('placed')) return;
-            // Thêm vào danh sách đã chọn
             sentenceSelected.push(sentenceWords[idx]);
             wordEl.classList.add('placed');
             wordEl.style.order = sentenceSelected.length;
@@ -2084,7 +2134,6 @@
                 showToast('✅ Chính xác!', 'success');
             } else {
                 showToast(`❌ Sai. Đáp án: ${sentenceCorrectOrder.join(' ')}`, 'error');
-                // Hiển thị đáp án
                 const container = document.getElementById('sentenceContainer');
                 if (container) {
                     const words = container.querySelectorAll('.sentence-word');
@@ -2092,7 +2141,6 @@
                         el.classList.add('disabled');
                         el.style.cursor = 'default';
                     });
-                    // Sắp xếp lại đúng thứ tự
                     sentenceCorrectOrder.forEach((word, i) => {
                         const el = container.querySelector(`.sentence-word:not(.placed)`);
                         if (el && el.textContent === word) {
@@ -2246,21 +2294,31 @@
         // ============================================================
         // START
         // ============================================================
-        init();
-
-        function init() {
+        async function init() {
             applyTheme();
-            loadFromStorage();
+            // Thử đọc từ file JSON trước
+            await loadFromJsonFile();
+            // Nếu vẫn chưa có dữ liệu, fallback
             if (words.length === 0) {
-                words = DEFAULT_WORDS.map(w => ({ ...w }));
-                nextId = words.reduce((max, w) => Math.max(max, w.id), 0) + 1;
+                loadFromStorage();
+                if (words.length === 0) {
+                    words = DEFAULT_WORDS.map(w => ({ ...w }));
+                    nextId = words.reduce((max, w) => Math.max(max, w.id), 0) + 1;
+                    saveToStorage();
+                }
+                renderAll();
+                updateSidebarStats();
             }
+            // Đảm bảo các trường còn thiếu
             words = words.map(w => ({ ...w, wordClass: w.wordClass || '', pronunciation: w.pronunciation || '',
                 category: w.category || 'general' }));
             renderAll();
             updateSidebarStats();
             saveToStorage();
         }
+
+        // Khởi động
+        init();
     </script>
 </body>
 </html>
