@@ -177,6 +177,20 @@
             margin-top: 8px;
         }
         .sidebar-footer .stats-mini span { font-weight: 600; color: var(--text); }
+        .auto-export-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 8px;
+            font-size: 13px;
+            color: var(--text-light);
+        }
+        .auto-export-toggle input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: var(--primary);
+        }
         /* ===== MAIN CONTENT ===== */
         .main {
             background: var(--card-bg);
@@ -960,6 +974,10 @@
                     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importJSON(event)" />
                     <button class="btn btn-sm btn-primary" onclick="reloadFromJson()"><i class="fas fa-sync"></i> Tải lại từ JSON</button>
                 </div>
+                <div class="auto-export-toggle">
+                    <input type="checkbox" id="autoExportCheckbox" onchange="toggleAutoExport()" />
+                    <label for="autoExportCheckbox">Tự động xuất JSON khi có thay đổi</label>
+                </div>
             </div>
         </aside>
 
@@ -1056,7 +1074,7 @@
                     <div class="actions">
                         <div class="quiz-size-input">
                             <label for="quizSizeInput">Số từ mỗi lượt:</label>
-                            <input type="number" id="quizSizeInput" min="10" max="50" value="10" />
+                            <input type="number" id="quizSizeInput" min="2" max="999" value="10" />
                         </div>
                         <button class="btn btn-primary" onclick="startQuiz()"><i class="fas fa-play"></i> Bắt đầu</button>
                     </div>
@@ -1276,9 +1294,11 @@
         let words = [];
         let nextId = 1;
         let currentPage = 'dashboard';
+        let autoExport = localStorage.getItem('vocabmaster_autoExport') === 'true';
 
         let fcIndex = 0;
         let fcOrder = [];
+        let fcOrderDirty = true;
 
         let quizWords = [];
         let quizIndex = 0;
@@ -1331,6 +1351,23 @@
         }
 
         // ============================================================
+        // AUTO EXPORT
+        // ============================================================
+        function toggleAutoExport() {
+            const cb = document.getElementById('autoExportCheckbox');
+            autoExport = cb.checked;
+            localStorage.setItem('vocabmaster_autoExport', String(autoExport));
+            showToast(autoExport ? '✅ Tự động xuất JSON đã bật' : '🔕 Tự động xuất JSON đã tắt', 'info');
+        }
+
+        function maybeAutoExport() {
+            if (autoExport) {
+                exportJSON();
+                showToast('📤 Đã tự động xuất file JSON', 'success');
+            }
+        }
+
+        // ============================================================
         // STORAGE
         // ============================================================
         function saveToStorage() {
@@ -1339,6 +1376,8 @@
                 localStorage.setItem('vocabmaster_nextId', String(nextId));
                 localStorage.setItem('vocabmaster_quizBest', String(quizBest));
             } catch (_) {}
+            // Nếu auto export được bật, xuất file JSON
+            maybeAutoExport();
         }
 
         function loadFromStorage() {
@@ -1376,31 +1415,29 @@
                     dateAdded: item.dateAdded || Date.now(),
                 }));
 
-                // Cập nhật nextId
                 const maxId = words.reduce((max, w) => Math.max(max, w.id || 0), 0);
                 if (maxId >= nextId) nextId = maxId + 1;
 
-                // Lưu vào localStorage để dùng offline
                 saveToStorage();
+                fcOrderDirty = true;
                 renderAll();
                 updateSidebarStats();
                 showToast(`✅ Đã tải ${words.length} từ từ /voca/voca.json`, 'success');
             } catch (err) {
                 console.warn('Không thể tải /voca/voca.json:', err.message);
-                // Fallback: dùng dữ liệu từ localStorage hoặc mặc định
                 loadFromStorage();
                 if (words.length === 0) {
                     words = DEFAULT_WORDS.map(w => ({ ...w }));
                     nextId = words.reduce((max, w) => Math.max(max, w.id), 0) + 1;
                     saveToStorage();
                 }
+                fcOrderDirty = true;
                 renderAll();
                 updateSidebarStats();
                 showToast(`⚠️ Không tìm thấy /voca/voca.json, dùng dữ liệu mặc định`, 'error');
             }
         }
 
-        // Hàm reload thủ công
         async function reloadFromJson() {
             await loadFromJsonFile();
         }
@@ -1417,7 +1454,6 @@
             a.download = `voca.json`;
             a.click();
             URL.revokeObjectURL(url);
-            showToast('📤 Đã xuất file voca.json', 'success');
         }
 
         function importJSON(event) {
@@ -1456,6 +1492,7 @@
                         }
                     }
                     saveToStorage();
+                    fcOrderDirty = true;
                     renderAll();
                     updateSidebarStats();
                     showToast(`📥 Đã thêm ${added} từ, bỏ qua ${skipped} từ trùng`, 'success');
@@ -1613,6 +1650,7 @@
             const w = words.find(x => x.id === id);
             if (w) { w.mastered = !w.mastered;
                 saveToStorage();
+                fcOrderDirty = true;
                 renderAll();
                 updateSidebarStats();
                 showToast(w.mastered ? `✅ "${w.word}" đã nhớ!` : `🔄 "${w.word}" đang học`, 'info'); }
@@ -1623,6 +1661,7 @@
             const w = words.find(x => x.id === id);
             words = words.filter(x => x.id !== id);
             saveToStorage();
+            fcOrderDirty = true;
             renderAll();
             updateSidebarStats();
             showToast(`🗑️ Đã xóa "${w ? w.word : ''}"`, 'error');
@@ -1633,19 +1672,27 @@
         // ============================================================
         function buildFlashcardOrder() {
             const unmastered = words.filter(w => !w.mastered);
-            const mastered = words.filter(w => w.mastered);
-            fcOrder = [...unmastered, ...mastered];
-            if (fcOrder.length === 0) fcOrder = words.slice();
+            fcOrder = [...unmastered];
+            if (fcOrder.length === 0) fcOrder = [];
             fcIndex = Math.min(fcIndex, fcOrder.length - 1);
             if (fcIndex < 0) fcIndex = 0;
+            fcOrderDirty = false;
         }
 
         function renderFlashcard() {
-            buildFlashcardOrder();
+            if (fcOrderDirty) {
+                buildFlashcardOrder();
+            }
             const container = document.getElementById('flashcardContainer');
             if (fcOrder.length === 0) {
-                container.innerHTML =
-                    `<div class="empty-state" style="padding:32px 0;"><i class="fas fa-layer-group" style="font-size:42px;"></i><h3>Chưa có từ</h3></div>`;
+                container.innerHTML = `
+                    <div class="empty-state" style="padding:32px 0;">
+                        <i class="fas fa-check-circle" style="font-size:56px;color:var(--success);"></i>
+                        <h3>🎉 Chúc mừng!</h3>
+                        <p>Bạn đã nhớ hết từ vựng trong danh sách.</p>
+                        <button class="btn btn-primary mt-8" onclick="resetFlashcards()">Đặt lại để học lại</button>
+                    </div>
+                `;
                 return;
             }
             document.getElementById('flashcard').classList.remove('flipped');
@@ -1668,14 +1715,21 @@
             fcIndex = (fcIndex - 1 + fcOrder.length) % fcOrder.length;
             renderFlashcard(); }
 
-        function shuffleFlashcards() { fcOrder = fcOrder.sort(() => Math.random() - 0.5);
+        function shuffleFlashcards() {
+            if (fcOrder.length === 0) return;
+            fcOrder = fcOrder.sort(() => Math.random() - 0.5);
+            fcIndex = 0;
+            fcOrderDirty = false;
+            renderFlashcard();
+            showToast('🔀 Đã xáo trộn', 'info');
+        }
+
+        function resetFlashcards() {
+            fcOrderDirty = true;
             fcIndex = 0;
             renderFlashcard();
-            showToast('🔀 Đã xáo trộn', 'info'); }
-
-        function resetFlashcards() { buildFlashcardOrder();
-            renderFlashcard();
-            showToast('🔄 Đặt lại', 'info'); }
+            showToast('🔄 Đặt lại', 'info');
+        }
 
         function markMastered() {
             if (fcOrder.length === 0) return;
@@ -1683,14 +1737,19 @@
             if (!w.mastered) {
                 w.mastered = true;
                 saveToStorage();
+                fcOrder = fcOrder.filter(item => item.id !== w.id);
+                if (fcOrder.length === 0) {
+                    fcOrderDirty = true;
+                } else {
+                    if (fcIndex >= fcOrder.length) fcIndex = 0;
+                }
                 updateSidebarStats();
-                showToast(`✅ "${w.word}" đã nhớ!`, 'success');
-                buildFlashcardOrder();
-                if (fcIndex >= fcOrder.length) fcIndex = fcOrder.length - 1;
-                if (fcIndex < 0) fcIndex = 0;
                 renderFlashcard();
                 renderAll();
-            } else showToast(`"${w.word}" đã nhớ`, 'info');
+                showToast(`✅ "${w.word}" đã nhớ! Còn ${fcOrder.length} từ chưa nhớ`, 'success');
+            } else {
+                showToast(`"${w.word}" đã nhớ`, 'info');
+            }
         }
 
         function deleteCurrentCard() {
@@ -1699,9 +1758,7 @@
             if (!confirm(`Xóa "${w.word}"?`)) return;
             words = words.filter(x => x.id !== w.id);
             saveToStorage();
-            buildFlashcardOrder();
-            if (fcIndex >= fcOrder.length) fcIndex = fcOrder.length - 1;
-            if (fcIndex < 0) fcIndex = 0;
+            fcOrderDirty = true;
             renderFlashcard();
             renderAll();
             updateSidebarStats();
@@ -1712,9 +1769,7 @@
         // QUIZ - 10 DẠNG CÂU HỎI
         // ============================================================
         const QUIZ_TYPES = [
-            'multiple', 'listening',
-             //'fill', 
-             'listening_type',
+            'multiple', 'listening', 'fill', 'listening_type',
             'word_class', 'sentence_order', 'meaning_to_word',
             'matching', 'gap_fill', 'true_false'
         ];
@@ -1740,28 +1795,66 @@
             renderQuizQuestion();
         }
 
+        // ============================================================
+        // START QUIZ - Lấy 50% từ đã nhớ và 50% từ chưa nhớ
+        // ============================================================
         function startQuiz() {
             if (words.length < 3) { showToast('Cần ít nhất 3 từ', 'error'); return; }
 
-            // Lấy số lượng từ từ input
             const sizeInput = document.getElementById('quizSizeInput');
             let size = parseInt(sizeInput.value, 10);
             if (isNaN(size) || size < 2) size = 2;
             const maxSize = words.length;
             if (size > maxSize) size = maxSize;
-            sizeInput.value = size; // cập nhật lại giá trị hợp lệ
+            sizeInput.value = size;
 
-            const pool = words.filter(w => !w.mastered);
-            const source = pool.length >= size ? pool : words;
-            const shuffled = [...source].sort(() => Math.random() - 0.5);
-            const count = Math.min(size, shuffled.length);
-            quizWords = shuffled.slice(0, count);
+            const masteredWords = words.filter(w => w.mastered);
+            const unmasteredWords = words.filter(w => !w.mastered);
+
+            let half = Math.floor(size / 2);
+            let remaining = size - half;
+
+            let selectedMastered = [];
+            if (masteredWords.length > 0) {
+                const shuffledMastered = [...masteredWords].sort(() => Math.random() - 0.5);
+                const takeMastered = Math.min(half, shuffledMastered.length);
+                selectedMastered = shuffledMastered.slice(0, takeMastered);
+                if (takeMastered < half) {
+                    remaining += (half - takeMastered);
+                }
+            }
+
+            let selectedUnmastered = [];
+            if (unmasteredWords.length > 0) {
+                const shuffledUnmastered = [...unmasteredWords].sort(() => Math.random() - 0.5);
+                const takeUnmastered = Math.min(remaining, shuffledUnmastered.length);
+                selectedUnmastered = shuffledUnmastered.slice(0, takeUnmastered);
+                if (selectedUnmastered.length + selectedMastered.length < size) {
+                    const moreNeeded = size - (selectedUnmastered.length + selectedMastered.length);
+                    if (masteredWords.length > selectedMastered.length) {
+                        const remainingMastered = masteredWords.filter(w => !selectedMastered.includes(w));
+                        const shuffledRemaining = [...remainingMastered].sort(() => Math.random() - 0.5);
+                        const extra = shuffledRemaining.slice(0, moreNeeded);
+                        selectedMastered = [...selectedMastered, ...extra];
+                    }
+                }
+            }
+
+            let combined = [...selectedMastered, ...selectedUnmastered];
+            if (combined.length < size) {
+                const allWords = [...words].sort(() => Math.random() - 0.5);
+                const needMore = size - combined.length;
+                const additional = allWords.filter(w => !combined.includes(w)).slice(0, needMore);
+                combined = [...combined, ...additional];
+            }
+
+            quizWords = combined.sort(() => Math.random() - 0.5);
             quizIndex = 0;
             quizScore = 0;
             quizAnswered = false;
             matchingErrors = 0;
             renderQuizQuestion();
-            showToast(`📝 Bắt đầu quiz ${quizWords.length} câu`, 'info');
+            showToast(`📝 Bắt đầu quiz ${quizWords.length} câu (${selectedMastered.length} từ đã nhớ, ${selectedUnmastered.length} từ mới)`, 'info');
         }
 
         function renderQuizQuestion() {
@@ -1788,7 +1881,6 @@
 
             const w = quizWords[quizIndex];
             let type = QUIZ_TYPES[Math.floor(Math.random() * QUIZ_TYPES.length)];
-            // Đảm bảo dữ liệu đủ cho từng loại
             if (type === 'sentence_order' && !w.example) type = 'multiple';
             if (type === 'word_class' && !w.wordClass) type = 'multiple';
             if (type === 'listening_type' && !w.pronunciation) type = 'listening';
@@ -1849,7 +1941,6 @@
                 setTimeout(() => speakWord(quizWords[quizIndex].word), 400);
             }
 
-            // Auto-focus cho gap fill và fill blank
             if (type === 'gap_fill') {
                 setTimeout(() => {
                     const firstInput = document.querySelector('.gap-input');
@@ -1918,7 +2009,7 @@
                 renderQuizQuestion(); }, 1000);
         }
 
-        // ---------- 2. Listening (chọn từ đúng) ----------
+        // ---------- 2. Listening ----------
         function renderListening(w) {
             let options = [w.word];
             const pool = words.filter(x => x.id !== w.id);
@@ -1954,22 +2045,22 @@
                 renderQuizQuestion(); }, 1000);
         }
 
-        // ---------- 3. Fill blank (điền vào chỗ trống trong câu) ----------
-        // function renderFillBlank(w) {
-        //     let sentence = w.example || `${w.word} is a common word.`;
-        //     const regex = new RegExp(`\\b${w.word}\\b`, 'i');
-        //     const parts = sentence.split(regex);
-        //     if (parts.length < 2) {
-        //         sentence = `The word "${w.word}" means ${w.meaning}.`;
-        //         const parts2 = sentence.split(w.word);
-        //         if (parts2.length >= 2) {
-        //             return renderFillWithParts(w, parts2);
-        //         } else {
-        //             return renderMultipleChoice(w);
-        //         }
-        //     }
-        //     return renderFillWithParts(w, parts);
-        // }
+        // ---------- 3. Fill blank ----------
+        function renderFillBlank(w) {
+            let sentence = w.example || `${w.word} is a common word.`;
+            const regex = new RegExp(`\\b${w.word}\\b`, 'i');
+            const parts = sentence.split(regex);
+            if (parts.length < 2) {
+                sentence = `The word "${w.word}" means ${w.meaning}.`;
+                const parts2 = sentence.split(w.word);
+                if (parts2.length >= 2) {
+                    return renderFillWithParts(w, parts2);
+                } else {
+                    return renderMultipleChoice(w);
+                }
+            }
+            return renderFillWithParts(w, parts);
+        }
 
         function renderFillWithParts(w, parts) {
             quizFillAnswer = w.word;
@@ -2055,7 +2146,7 @@
                 renderQuizQuestion(); }, 1500);
         }
 
-        // ---------- 4. Listening type (nghe và viết) ----------
+        // ---------- 4. Listening type ----------
         function renderListeningType(w) {
             return `
                 <div class="quiz-question">🎧 <small>Nghe và nhập từ đúng</small>
@@ -2250,14 +2341,11 @@
         }
 
         // ============================================================
-        // 8. MATCHING (sai 3 lần -> bỏ qua, random từ trong quizWords)
+        // 8. MATCHING
         // ============================================================
         function renderMatching(w) {
-            // Reset error counter
             matchingErrors = 0;
-            // Lấy tối đa 5 từ ngẫu nhiên từ quizWords
             const total = Math.min(5, quizWords.length);
-            // Xáo trộn quizWords và lấy 'total' từ đầu
             const shuffledQuizWords = [...quizWords].sort(() => Math.random() - 0.5);
             const selected = shuffledQuizWords.slice(0, total);
 
@@ -2304,38 +2392,31 @@
 
         function selectMatchingItem(type, index) {
             if (quizAnswered) return;
-            // Nếu item đã được ghép, bỏ qua
             if (matchingErrors >= MAX_MATCHING_ERRORS) return;
 
             const item = matchingPairs[index];
             if (type === 'word' && item.matched) return;
             if (type === 'meaning') {
-                // Tìm xem nghĩa này đã được ghép chưa
                 const matched = matchingPairs.some(p => p.matched && p.meaning === document.querySelectorAll('.meaning-item')[
                     index].textContent.trim());
                 if (matched) return;
             }
 
-            // Nếu chưa chọn gì, chọn item hiện tại
             if (matchingSelectedType === null) {
                 matchingSelectedType = type;
                 matchingSelectedIdx = index;
-                // Highlight
                 document.querySelectorAll('.matching-item').forEach(el => el.classList.remove('selected'));
                 const el = document.querySelector(`.${type}-item[data-index="${index}"]`);
                 if (el) el.classList.add('selected');
                 return;
             }
 
-            // Nếu đã chọn một item, thử ghép cặp
             const firstType = matchingSelectedType;
             const firstIdx = matchingSelectedIdx;
             const secondType = type;
             const secondIdx = index;
 
-            // Không cho phép ghép cùng loại
             if (firstType === secondType) {
-                // Bỏ chọn cũ và chọn mới
                 document.querySelectorAll('.matching-item').forEach(el => el.classList.remove('selected'));
                 matchingSelectedType = type;
                 matchingSelectedIdx = index;
@@ -2344,7 +2425,6 @@
                 return;
             }
 
-            // Xác định word và meaning
             let wordIdx, meaningIdx;
             if (firstType === 'word') {
                 wordIdx = firstIdx;
@@ -2357,13 +2437,11 @@
             const wordObj = matchingPairs[wordIdx];
             const meaningText = document.querySelectorAll('.meaning-item')[meaningIdx].textContent.trim();
 
-            // Kiểm tra nếu từ đã ghép hoặc nghĩa đã ghép
             if (wordObj.matched) {
                 showToast('Từ này đã được ghép!', 'error');
                 resetMatchingSelection();
                 return;
             }
-            // Kiểm tra nghĩa đã ghép chưa
             const meaningMatched = matchingPairs.some(p => p.matched && p.meaning === meaningText);
             if (meaningMatched) {
                 showToast('Nghĩa này đã được ghép!', 'error');
@@ -2371,11 +2449,8 @@
                 return;
             }
 
-            // Ghép cặp tạm thời
             if (wordObj.meaning === meaningText) {
-                // Đúng
                 wordObj.matched = true;
-                // Đánh dấu giao diện
                 const wordEl = document.querySelector(`.word-item[data-index="${wordIdx}"]`);
                 const meaningEl = document.querySelector(`.meaning-item[data-index="${meaningIdx}"]`);
                 if (wordEl) { wordEl.classList.add('matched');
@@ -2384,12 +2459,10 @@
                     meaningEl.classList.remove('selected'); }
                 document.getElementById('matchedCount').textContent = matchingPairs.filter(p => p.matched).length;
                 resetMatchingSelection();
-                // Nếu ghép đủ hết, tự động kiểm tra
                 if (matchingPairs.every(p => p.matched)) {
                     setTimeout(() => checkMatching(), 300);
                 }
             } else {
-                // Sai: hiển thị lỗi và reset
                 matchingErrors++;
                 const wordEl = document.querySelector(`.word-item[data-index="${wordIdx}"]`);
                 const meaningEl = document.querySelector(`.meaning-item[data-index="${meaningIdx}"]`);
@@ -2455,11 +2528,10 @@
             }
         }
 
-        // ---------- 9. GAP FILL (điền chữ còn thiếu) - auto check khi nhập đủ ----------
+        // ---------- 9. GAP FILL ----------
         function renderGapFill(w) {
             const word = w.word;
             const len = word.length;
-            // Chọn ngẫu nhiên 30-50% số ký tự để ẩn (ít nhất 2 ký tự)
             const numHide = Math.max(2, Math.floor(len * 0.4));
             const indices = [];
             while (indices.length < numHide) {
@@ -2568,13 +2640,11 @@
 
         // ---------- 10. TRUE / FALSE ----------
         function renderTrueFalse(w) {
-            // Lấy một từ khác để tạo câu sai
             let otherWord = null;
             const pool = words.filter(x => x.id !== w.id);
             if (pool.length > 0) {
                 otherWord = pool[Math.floor(Math.random() * pool.length)];
             }
-            // Quyết định đúng hay sai: 50% đúng, 50% sai
             const isCorrect = Math.random() < 0.5;
             let displayWord, displayMeaning;
             if (isCorrect) {
@@ -2585,7 +2655,6 @@
                     displayWord = w.word;
                     displayMeaning = otherWord.meaning;
                 } else {
-                    // Nếu không có từ khác, tự tạo sai
                     displayWord = w.word;
                     displayMeaning = w.meaning + ' (sai)';
                 }
@@ -2635,6 +2704,7 @@
             words.push({ id: nextId++, word, wordClass, pronunciation, meaning, example: example || '', category,
                 mastered: false, dateAdded: Date.now() });
             saveToStorage();
+            fcOrderDirty = true;
             clearForm();
             renderAll();
             updateSidebarStats();
@@ -2669,6 +2739,7 @@
             }
             if (count === 0) { showToast('Không có từ mới', 'error'); return; }
             saveToStorage();
+            fcOrderDirty = true;
             document.getElementById('bulkInput').value = '';
             renderAll();
             updateSidebarStats();
@@ -2721,7 +2792,6 @@
             }
         });
 
-        // Tự động focus và chuyển tab, auto check khi nhập đủ các ô gap-fill
         document.addEventListener('input', function(e) {
             if (e.target.classList && e.target.classList.contains('gap-input')) {
                 const input = e.target;
@@ -2751,9 +2821,11 @@
         // ============================================================
         async function init() {
             applyTheme();
-            // Thử đọc từ file JSON trước
+            // Đọc trạng thái auto export
+            const cb = document.getElementById('autoExportCheckbox');
+            cb.checked = autoExport;
+
             await loadFromJsonFile();
-            // Nếu vẫn chưa có dữ liệu, fallback
             if (words.length === 0) {
                 loadFromStorage();
                 if (words.length === 0) {
@@ -2764,15 +2836,14 @@
                 renderAll();
                 updateSidebarStats();
             }
-            // Đảm bảo các trường còn thiếu
             words = words.map(w => ({ ...w, wordClass: w.wordClass || '', pronunciation: w.pronunciation || '',
                 category: w.category || 'general' }));
+            fcOrderDirty = true;
             renderAll();
             updateSidebarStats();
             saveToStorage();
         }
 
-        // Khởi động
         init();
     </script>
 </body>
